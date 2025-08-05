@@ -20,7 +20,7 @@ variables:
   ARTEFACT_FILE: "ARTEFACT_FILE"
 
 before_script:
-    - export http_proxy=http://${LOGIN}:${PASS}@138.21.89.192:3128
+    - export http_proxy=http://${LOGIN}:${PASS}@{IP}
     - export https_proxy=$http_proxy
 
 stages: 
@@ -50,4 +50,5 @@ stages:
   - apply_debug
   - export_vars
   - tags
+
 
