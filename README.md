@@ -1,184 +1,400 @@
-
-## Terraform Factory Pipeline
-
-This factory enables Confluent Cloud resource provisioning through Terraform. It is designed to be triggered from a source project via GitLab CI pipeline.
+# Confluent Terraform Factory
 
 ## 🌐 Overview
 
-The pipeline is triggered by a source project and uses a YAML configuration file to create Terraform resources. States (tfstate) are stored in the GitLab backend, with a separate state file for each project/branch.
+This Confluent factory enables automated provisioning of Confluent Cloud resources via Terraform. It's designed to be triggered from source projects via GitLab CI pipelines, providing a centralized and standardized approach for Kafka resource management.
+
+## 🏗️ Architecture
+
+```
+┌─────────────────┐    trigger    ┌─────────────────────┐
+│  Source Project │──────────────►│  Terraform Factory  │
+│                 │               │                     │
+│ factory-config  │               │  ┌─────────────────┐│
+│ schemas/        │               │  │   Modules       ││
+│ connectors/     │               │  │                 ││
+│ flink/          │               │  │ • Environment   ││
+└─────────────────┘               │  │ • Cluster       ││
+                                  │  │ • Topics        ││
+                                  │  │ • Schema Reg.   ││
+                                  │  │ • API Keys      ││
+                                  │  │ • ACLs          ││
+                                  │  │ • Connectors    ││
+                                  │  │ • ksqlDB        ││
+                                  │  │ • Flink         ││
+                                  │  └─────────────────┘│
+                                  └─────────────────────┘
+```
 
 ## 📋 Prerequisites
 
-- A source project with:
-  - A configuration file (`factory-config.yml`)
-  - A configured trigger pipeline
-- Access to Harbor Docker registry
-- GitLab token for Terraform backend access
+### Factory Project
+- GitLab Runner with Docker access
+- Configured GitLab CI variables:
+  - `CONFLUENT_CLOUD_API_KEY`
+  - `CONFLUENT_CLOUD_API_SECRET`
+  - `TF_HTTP_USERNAME`
+  - `TF_HTTP_PASSWORD`
+  - Environment-specific API variables (auto-generated)
 
-## 🔄 Pipeline Stages
+### Source Project
+- Configured `factory-config.yml` file
+- `schemas/`, `connectors/`, and `flink/` directories if needed
+- GitLab CI pipeline configured to trigger factory
 
-### 1. Read Config
-- **Stage**: `read_config`
-- **Purpose**: Retrieve and validate source project configuration
-- **Actions**:
-  - Fetches configuration file from source project
-  - Generates unique Terraform state filename
-  - Creates `terraform.env` with environment variables
+## 🚀 Quick Start
 
-### 2. Initialize
-- **Stage**: `init`
-- **Purpose**: Initialize Terraform with GitLab backend
-- **Actions**:
-  - Configures GitLab HTTP backend
-  - Downloads required providers
-  - Sets up state locking
+### 1. Source Project Configuration
 
-### 3. Plan
-- **Stage**: `plan`
-- **Purpose**: Create Terraform execution plan
-- **Actions**:
-  - Reads configuration
-  - Generates detailed change plan
-  - Saves plan for apply stage
+Create your `factory-config.yml` file:
 
-### 4. Apply
-- **Stage**: `apply`
-- **Purpose**: Apply planned changes
-- **Action**: Executes Terraform plan
-- **Note**: Manual trigger required
-
-### 5. Destroy (Optional)
-- **Stage**: `destroy`
-- **Purpose**: Remove all resources
-- **Action**: Destroys created infrastructure
-- **Note**: Manual trigger required
-
-## 🔧 Configuration
-
-
-## 📤 Triggering from Source Project
-
-1. **Source Project Configuration**:
-   ```yaml
-   # .gitlab-ci.yml in source project
-   trigger_factory:
-     stage: trigger
-     trigger:
-       project: "irn-79267/kafka-iam-and-observability"
-       branch: "main"
-       strategy: depend
-     variables:
-       SOURCE_PROJECT_ID: $CI_PROJECT_ID
-       SOURCE_COMMIT_BRANCH: $CI_COMMIT_BRANCH
-       CONFIG_FILE: "factory-config.yml"
-   ```
-
-2. **Required Variables in Source Project**:
-   - `SOURCE_PROJECT_ID`: Source project ID
-   - `SOURCE_COMMIT_BRANCH`: Source branch
-   - `SOURCE_JOB_NAME`: Trigger job name
-   - `SOURCE_JOB_ID`: Source job ID
-
-## 📁 Terraform State Structure
-
-- State filename is dynamically generated: `${SOURCE_PROJECT_ID}_${SOURCE_COMMIT_BRANCH}.tfstate`
-- Stored in factory project's GitLab backend
-- Locks managed via GitLab API
-
-## 🔐 Security
-
-- Pipeline triggered only via trigger (`SOURCE_JOB_NAME == "trigger_factory_pipeline"`)
-- Apply and destroy stages protected by manual validation
-- Credentials secured via GitLab variables
-
-## ⚠️ Important Notes
-
-1. **Terraform State**:
-   - Unique per source project/branch
-   - Do not modify manually
-
-2. **Triggering**:
-   - Verify cross-project permissions
-   - Ensure configuration file is valid
-
-3. **Apply/Destroy**:
-   - Manual actions required
-   - Verify plan before applying
-
-## 🚀 Usage Example
-
-### 1. Create Configuration File
 ```yaml
-# factory-config.yml
 project:
-  name: "confluent-billing-mfs"
-  environment: "dev"
+  name: "my-project"
+  environment: "MFS-dev"
+  cluster: "cluster-dev"
+  team: "data-team"
+  domain: "Data"
+  cost_center: "IRN12345"
+  owner: "team-lead"
 
 resources:
+  # Topics following naming convention
   topics:
-    - name: "CORP.dev.mfs.kafka.raw.billing.v1.log"
+    - name: "corp.dev.mfs.kafka.raw.billing.v1.log"
       partitions: 3
       retention_ms: 604800000
+      cleanup_policy: "delete"
+  
+  # Schema Registry subjects
+  schema_registry:
+    - subject_name: "corp.dev.mfs.kafka.raw.billing.v1.log-value"
+      subject_format: "AVRO"
+      subject_path: "./schemas/avro/billing-schema.avsc"
+  
+  # ksqlDB cluster configuration
+  ksqldb:
+    cluster_name: "ksqldb-analytics"
+    csu: 2
+  
+  # ACLs with wildcard support
+  acl:
+    acl_to_produce:
+      topics_prefixes: ["corp.dev.mfs.kafka.raw.*", "corp.dev.mfs.kafka.refined.*"]
+    acl_to_consume:
+      topics_prefixes: ["corp.dev.mfs.kafka.*"]
 ```
 
-### 2. Setup Pipeline Trigger
+### 2. GitLab CI Pipeline Configuration
+
+Create `.gitlab-ci.yml` in your project:
+
 ```yaml
-# In your source project's .gitlab-ci.yml
 include:
   - local: 'terraform-ci.yml'
+
+variables:
+  FACTORY_PROJECT_ID: "irn-79267/kafka-iam-and-observability"
+  FACTORY_BRANCH: "main"
 
 stages:
   - prepare
   - trigger
-
-prepare_config:
-  stage: prepare
-  script:
-    - cp factory-config.yml $CONFIG_FILE_NAME
 ```
 
-### 3. Monitor Execution
-- Check pipeline progress in factory project
-- Review Terraform plan
-- Manually approve apply stage
+### 3. Deploy
 
-## 🔍 Troubleshooting
+1. Commit your files
+2. Launch pipeline via GitLab interface
+3. Pipeline automatically triggers factory
+4. Manually approve the `apply` stage
 
-Common issues and solutions:
+## 🔄 Pipeline Stages
 
-1. **Pipeline Not Triggering**
-   - Check source project permissions
-   - Verify trigger configuration
-   - Ensure CONFIG_FILE exists
+### Factory Pipeline
 
-2. **State Lock Issues**
-   - Check for existing locks
-   - Verify GitLab API access
-   - Ensure proper credentials
+1. **Read Config**: Retrieve configuration from source project
+2. **Prepare Plan**: Tag validation and preparation
+3. **Plan**: Generate Terraform execution plan
+4. **Apply**: Apply changes (manual approval required)
 
-3. **Configuration Errors**
-   - Validate YAML syntax
-   - Check resource naming conventions
-   - Verify required fields
+### Terraform States
 
-## 📚 Related Documentation
+- Storage in GitLab HTTP backend
+- State name: `${SOURCE_PROJECT_NAME}_${SOURCE_COMMIT_BRANCH}.tfstate`
+- Automatic locking via GitLab API
 
+## 📁 Module Structure
+
+```
+modules/
+├── confluent_environment/          # Environment creation
+├── confluent_cluster/              # Kafka clusters
+├── confluent_topics/               # Kafka topics
+├── confluent_schema_registry/      # Avro/JSON/Protobuf schemas
+├── confluent_service_account/      # Service accounts
+├── confluent_api_key/              # API keys
+├── confluent_acl/                  # ACL permissions
+├── confluent_rolebinding_access_control/ # RBAC
+├── confluent_connector/            # Connectors
+├── confluent_ksql/                 # ksqlDB clusters
+├── confluent_flink/                # Flink pools
+├── confluent_flink_statement/      # Flink SQL statements
+├── confluent_network_psc/          # Private networks
+├── confluent_network_link_access/  # Network access
+├── confluent_tags/                 # Metadata tags
+└── confluent_topic_tags/           # Topic-tag associations
+```
+
+## 📝 Topic Naming Convention
+
+**Follow the standard pattern:**
+`<Country Code>.<Env>.<ProducerOwner>.<Domain>.<Topic Layer>.<Topic name>.v<Topic Version>.<Topic kind>`
+
+**Examples:**
+- `corp.dev.mfs.kafka.raw.billing.v1.log`
+- `fr.prod.finance.payments.refined.transactions.v2.event`
+- `us.test.analytics.user.aggregated.sessions.v1.table`
+
+**Components:**
+- **Country Code**: `corp`, `fr`, `us`, `de`, etc.
+- **Environment**: `dev`, `test`, `prod`, `staging`
+- **Producer Owner**: Team/service owning the topic
+- **Domain**: Business domain (finance, analytics, etc.)
+- **Topic Layer**: `raw`, `refined`, `aggregated`
+- **Topic Name**: Descriptive name
+- **Version**: `v1`, `v2`, etc.
+- **Topic Kind**: `log`, `event`, `table`, `changelog`
+
+## 🔐 Security and Best Practices
+
+### Secret Management
+- ✅ All API keys stored as GitLab CI variables
+- ✅ Terraform variables marked `sensitive = true`
+- ✅ Use of `nonsensitive()` only for outputs
+- ✅ Separate sensitive/non-sensitive configs for connectors
+
+### Access and Permissions
+- Limited access to CI/CD variables
+- Regular API key rotation
+- Least privilege principle for service accounts
+
+## 📊 Supported Environments
+
+- **dev**: Development
+- **int**: Integration
+- **sta**: Staging
+- **ope**: Production
+- **debug**: Testing and debugging
+
+Each environment has:
+- Its own Confluent cluster
+- Its own service accounts
+- Its own API keys
+- Its isolated Terraform state
+
+## 🔧 Advanced Configuration
+
+### ksqlDB Clusters
+
+Configure ksqlDB for stream processing:
+
+```yaml
+resources:
+  ksqldb:
+    cluster_name: "analytics-ksqldb"
+    csu: 4                          # Confluent Streaming Units
+    service_account: "ksql-sa"      # Optional custom SA
+```
+
+**Features:**
+- Automatic service account creation
+- Environment admin permissions
+- Integration with Kafka cluster
+- Schema Registry access
+
+### Custom Connectors
+
+```yaml
+connectors:
+  source:
+    - name: "billing-source-connector"
+      path: "./connectors/source/datagen"
+  sink:
+    - name: "analytics-sink-connector"
+      path: "./connectors/sink/BigQuery"
+```
+
+Required structure:
+```
+connectors/source/datagen/
+├── config_nonsensitive.json
+└── config_sensitive.json
+```
+
+### Flink SQL Statements
+
+```yaml
+flink_statements:
+  - name: "billing-aggregation"
+    statement_path: "./flink/statements/billing-agg.sql"
+```
+
+Example Flink SQL:
+```sql
+CREATE TABLE billing_events (
+  transaction_id STRING,
+  amount DECIMAL(10,2),
+  currency STRING,
+  event_time TIMESTAMP(3),
+  WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND
+) WITH (
+  'connector' = 'kafka',
+  'topic' = 'corp.prod.mfs.kafka.raw.billing.v1.log',
+  'properties.bootstrap.servers' = 'pkc-xxxxx.region.provider.confluent.cloud:9092'
+);
+```
+
+### Schema References
+
+```yaml
+schema_registry:
+  - subject_name: "order-value"
+    subject_format: "AVRO"
+    subject_path: "./schemas/order.avsc"
+    schema_references:
+      - name: "address"
+        subject_name: "address-value"
+        version: 1
+```
+
+### Wildcard ACLs
+
+The factory supports wildcard patterns in ACL configurations:
+
+```yaml
+acl:
+  acl_to_produce:
+    topics_prefixes: 
+      - "corp.prod.mfs.kafka.raw.*"      # All raw topics
+      - "corp.prod.mfs.kafka.refined.*"  # All refined topics
+      - "corp.prod.analytics.*"          # All analytics topics
+  
+  acl_to_consume:
+    topics_prefixes:
+      - "corp.prod.mfs.kafka.*"          # All MFS topics
+      - "corp.prod.finance.payments.*"   # All payment topics
+      - "*billing*"                      # Any topic containing 'billing'
+```
+
+**Wildcard Patterns:**
+- `*` matches any sequence of characters
+- `?` matches any single character
+- Patterns are matched as prefixes by default
+- Use with caution in production environments
+
+## 🏷️ Automatic Tagging System
+
+Tags are automatically generated from configuration file:
+
+- **team_tag**: `${team}_team`
+- **environment_tag**: `${env_suffix}_environment`
+- **cost_center_tag**: `${cost_center}_cost_center`
+- **domain_tag**: `${domain}_domain`
+- **owner_tag**: `${owner}_owner`
+
+These tags are automatically applied to created topics and enable:
+- Cost tracking and allocation
+- Resource governance
+- Compliance auditing
+- Search and discovery
+
+## 🚨 Troubleshooting
+
+### Common Errors
+
+1. **Pipeline not triggering**
+   ```bash
+   # Check cross-project permissions
+   # Verify FACTORY_PROJECT_ID variable
+   # Ensure factory-config.yml exists
+   ```
+
+2. **State lock errors**
+   ```bash
+   # Force unlock via GitLab API
+   curl -X DELETE "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${STATE_NAME}/lock" \
+        -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}"
+   ```
+
+3. **Missing variables**
+   ```bash
+   # Check in GitLab UI: Settings > CI/CD > Variables
+   # Verify naming: TF_VAR_*_{environment_suffix}
+   ```
+
+4. **ksqlDB cluster creation fails**
+   ```bash
+   # Ensure Kafka cluster exists first
+   # Verify service account permissions
+   # Check CSU limits for environment
+   ```
+
+5. **Topic naming validation**
+   ```bash
+   # Verify naming convention compliance
+   # Check for reserved keywords
+   # Validate character set (alphanumeric, dots, hyphens)
+   ```
+
+### Logs and Monitoring
+
+- Check pipeline artifacts for details
+- `tf_output_credentials.json` contains generated keys
+- Terraform plan available in artifacts
+- ksqlDB logs available in Confluent Control Center
+
+## 🤝 Contributing
+
+### Adding a New Module
+
+1. Create directory `modules/new_module/`
+2. Implement `main.tf`, `variables.tf`, `outputs.tf`, `provider.tf`
+3. Add call in main `main.tf`
+4. Document in README
+5. Test on debug environment
+
+### Pipeline Modifications
+
+1. Modify `*-terraform-ci.yml` files
+2. Test with `ENVIRONMENT_NAME=debug`
+3. Validate across all environments
+
+### ksqlDB Enhancements
+
+1. Add new ksqlDB features to module
+2. Update variable validation
+3. Test stream processing capabilities
+4. Document new functionality
+
+## 📚 Resources
+
+- [Confluent Provider Documentation](https://registry.terraform.io/providers/confluentinc/confluent/latest/docs)
 - [GitLab CI Documentation](https://docs.gitlab.com/ee/ci/)
-- [Terraform Documentation](https://www.terraform.io/docs)
 - [Terraform HTTP Backend](https://www.terraform.io/docs/language/settings/backends/http.html)
+- [ksqlDB Documentation](https://docs.ksqldb.io/)
+- [Confluent Schema Registry Guide](https://docs.confluent.io/platform/current/schema-registry/)
 
-## 💡 Contributing
+## 📞 Support
 
-1. Fork the factory project
-2. Create your feature branch
-3. Submit merge request with:
-   - Clear description of changes
-   - Updated documentation
-   - Test results
+- **Issues**: Create a Jira issue 
+- **Contact**: Kafka Platform Team
+- **Documentation**: Confluence
+- **ksqlDB  & Flink Support**: Kafka Platform Team
 
-## 📧 Support
+---
 
-For issues or questions:
-- Create GitLab issue
-- Contact platform team
-- Check troubleshooting guide
+**Version**: 2.1.0  
+**Last Updated**: August 2025  
+**Confluent Provider**: 2.1.0  
+**Supported Features**: Topics, Schema Registry, ACLs, Connectors, ksqlDB, Flink, RBAC
