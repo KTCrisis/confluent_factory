@@ -1,0 +1,103 @@
+default:  
+  image: 
+    name : ${HARBOR_URL}/common/hashicorp/terraform:1.0.8
+    entrypoint: [""]
+
+stages:
+  - init_debug
+  - plan_debug
+  - apply_debug
+  - export_vars
+
+terraform_init_create_mfs_debug:
+  stage: init_debug
+  variables:
+    TF_STATE_NAME : "confluent_mfs_debug.tfstate"
+    TF_HTTP_SSL_VERIFY: "false"
+    TF_HTTP_ADDRESS:  ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${TF_STATE_NAME}
+    TF_HTTP_LOCK_ADDRESS: ${TF_HTTP_ADDRESS}/lock
+    TF_HTTP_UNLOCK_ADDRESS: ${TF_HTTP_ADDRESS}/lock
+    TF_HTTP_USERNAME: ${TF_HTTP_USERNAME}
+    TF_HTTP_PASSWORD: ${TF_HTTP_PASSWORD}
+    TF_HTTP_LOCK_METHOD: "POST"
+    TF_HTTP_UNLOCK_METHOD: "DELETE"
+    TF_HTTP_RETRY_WAIT_MIN: "5"
+  script:
+    - cd confluent-mfs/debug/
+    - ln -s ../../provider.tf provider.tf
+    - ln -s ../../backend.tf backend.tf    
+    - ln -s ../variables.tf variables.tf
+    - ln -s ../main.tf main.tf
+    - ln -s ../outputs.tf outputs.tf
+    - echo "CI_API_V4_URL=${CI_API_V4_URL}, CI_PROJECT_ID=${CI_PROJECT_ID}, CI_PROJECT_NAME=${CI_PROJECT_NAME}, CI_COMMIT_REF_NAME=${CI_COMMIT_REF_NAME}, PROJECT_NAME=${PROJECT_NAME}"
+    - terraform init
+        -backend-config="address=${TF_HTTP_ADDRESS}"
+        -backend-config="lock_address=${TF_HTTP_LOCK_ADDRESS}"
+        -backend-config="unlock_address=${TF_HTTP_UNLOCK_ADDRESS}"
+        -backend-config="username=${TF_HTTP_USERNAME}"
+        -backend-config="password=${TF_HTTP_PASSWORD}"
+        -backend-config="lock_method=${TF_HTTP_LOCK_METHOD}"
+        -backend-config="unlock_method=${TF_HTTP_UNLOCK_METHOD}"
+        -backend-config="retry_wait_min=${TF_HTTP_RETRY_WAIT_MIN}"
+        -backend-config="skip_cert_verification=true"
+  artifacts:
+    paths:
+      - confluent-mfs/debug
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PROJECT_NAME == "" && $ENVIRONMENT_NAME == "debug"'
+      when: on_success
+  tags:
+    - docker9013
+
+terraform_plan_create_mfs_debug:
+  stage: plan_debug
+  script:
+    - cd confluent-mfs/debug/
+    - terraform plan -out=tfplan_create
+  dependencies:
+    - terraform_init_create_mfs_debug
+  artifacts:
+    paths:
+      - confluent-mfs/debug
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PROJECT_NAME == "" && $ENVIRONMENT_NAME == "debug"'
+      when: on_success
+  tags:
+    - docker9013
+
+terraform_apply_create_mfs_debug:
+  stage: apply_debug
+  script:
+    - cd confluent-mfs/debug/
+    - terraform apply tfplan_create
+    - terraform output -json service_accounts_credentials > tf_output_credentials.json
+  dependencies:
+    - terraform_plan_create_mfs_debug
+  artifacts:
+    paths:
+      - confluent-mfs/debug
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PROJECT_NAME == "" && $ENVIRONMENT_NAME == "debug"'
+      when: manual
+  tags:
+    - docker9013
+
+export_output_vars_debug:
+  stage: export_vars
+  image: ${HARBOR_URL}/irn-79267-kio/kio-python:1.0.0_b327
+  variables:
+    FILE_NAME: "config.yml"
+  script:
+    - cp scripts/create_gitlab_ci_variable.py confluent-mfs/debug/create_gitlab_ci_variable.py
+    - cd confluent-mfs/debug
+    - python3 create_gitlab_ci_variable.py
+  dependencies:
+    - terraform_apply_create_mfs_debug
+  artifacts:
+    paths:                                    
+      - confluent-mfs/debug
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PROJECT_NAME == "" && $ENVIRONMENT_NAME == "debug"'
+      when: on_success
+  tags:
+    - docker9013
