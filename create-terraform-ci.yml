@@ -1,0 +1,154 @@
+default:  
+  image: 
+    name : ${HARBOR_URL}/common/hashicorp/terraform:1.0.8
+    entrypoint: [""]
+
+stages:
+  - read_config
+  - init_create
+  - prepare_plan
+  - plan_create
+  - apply_create
+
+read_config:
+  image: ${HARBOR_URL}/devops-tools/linux-tools:latest
+  stage: read_config
+  script:
+    - |
+      echo "Retrieving artifact from upstream pipeline"
+      echo "Source Project ID: $SOURCE_PROJECT_ID" 
+      echo "Source Project NAME: $SOURCE_PROJECT_NAME"
+      echo "Source Commit Branch: $SOURCE_COMMIT_BRANCH"
+      echo "Config File: $CONFIG_FILE_NAME"
+      echo "Schemas: $SCHEMAS_DIRECTORY_NAME"
+      echo "Connectors: $CONNECTORS_DIRECTORY_NAME"
+      echo "Flink statements: $FLINK_STATEMENTS_DIRECTORY_NAME"
+      echo "Source Job Name: $SOURCE_JOB_NAME"
+      echo "Source Job Name: $SOURCE_JOB_ID"
+    - curl -o "${ARTEFACT_FILE}.zip" -X GET -k
+      -F token=${CI_JOB_TOKEN}
+      "${CI_API_V4_URL}/projects/${SOURCE_PROJECT_ID}/jobs/${SOURCE_JOB_ID}/artifacts"
+    - unzip "$ARTEFACT_FILE.zip"
+    - rm -rf $ARTEFACT_FILE.zip
+  artifacts:
+    paths:
+      - $CONFIG_FILE_NAME
+      - $SCHEMAS_DIRECTORY_NAME
+      - $CONNECTORS_DIRECTORY_NAME
+      - $FLINK_STATEMENTS_DIRECTORY_NAME
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $SOURCE_JOB_NAME == "trigger_factory_pipeline"'
+      when: on_success
+  tags:
+    - docker9013
+
+terraform_init_create:
+  stage: init_create
+  variables:
+    TF_STATE_NAME : ${SOURCE_PROJECT_NAME}_${SOURCE_COMMIT_BRANCH}.tfstate
+    TF_HTTP_SSL_VERIFY: "false"
+    TF_HTTP_ADDRESS:  ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${TF_STATE_NAME}
+    TF_HTTP_LOCK_ADDRESS: ${TF_HTTP_ADDRESS}/lock
+    TF_HTTP_UNLOCK_ADDRESS: ${TF_HTTP_ADDRESS}/lock
+    TF_HTTP_USERNAME: "gitlab-ci-token"       
+    TF_HTTP_PASSWORD: ${CI_JOB_TOKEN} 
+    TF_HTTP_LOCK_METHOD: "POST"
+    TF_HTTP_UNLOCK_METHOD: "DELETE"
+    TF_HTTP_RETRY_WAIT_MIN: "5"
+  script:
+    - export TEMP_NAME=$(echo "${SOURCE_COMMIT_BRANCH}" | sed 's/[^a-zA-Z0-9]/_/g')
+    - export CLEAN_BRANCH_NAME=$(echo "${TEMP_NAME}" | sed 's/^_\+//; s/_\+$//')
+    - export TF_STATE_NAME="${SOURCE_PROJECT_NAME}_${CLEAN_BRANCH_NAME}.tfstate"
+    - export TF_HTTP_ADDRESS="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${TF_STATE_NAME}"
+    - export TF_HTTP_LOCK_ADDRESS="${TF_HTTP_ADDRESS}/lock"
+    - export TF_HTTP_UNLOCK_ADDRESS="${TF_HTTP_ADDRESS}/lock"
+
+    - terraform init
+        -backend-config="address=${TF_HTTP_ADDRESS}"
+        -backend-config="lock_address=${TF_HTTP_LOCK_ADDRESS}"
+        -backend-config="unlock_address=${TF_HTTP_UNLOCK_ADDRESS}"
+        -backend-config="username=${TF_HTTP_USERNAME}"
+        -backend-config="password=${TF_HTTP_PASSWORD}"
+        -backend-config="lock_method=${TF_HTTP_LOCK_METHOD}"
+        -backend-config="unlock_method=${TF_HTTP_UNLOCK_METHOD}"
+        -backend-config="retry_wait_min=${TF_HTTP_RETRY_WAIT_MIN}"
+        -backend-config="skip_cert_verification=true"
+  artifacts:
+    paths:
+      - .terraform
+      - .terraform.lock.hcl
+      - $CONFIG_FILE_NAME
+      - $SCHEMAS_DIRECTORY_NAME
+      - $CONNECTORS_DIRECTORY_NAME
+      - $FLINK_STATEMENTS_DIRECTORY_NAME
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $SOURCE_JOB_NAME == "trigger_factory_pipeline"'
+      when: on_success
+  tags:
+    - docker9013
+
+get_confluent_tags:
+  stage: prepare_plan 
+  image: ${HARBOR_URL}/irn-79267-kio/kio-python:1.0.0_b327
+  variables:
+    CONFIG_PATH: $CONFIG_FILE_NAME
+  script:
+    - python3 ./scripts/tags_check.py
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $SOURCE_JOB_NAME == "trigger_factory_pipeline"'
+      when: on_success
+  tags:
+    - docker9013
+
+
+terraform_plan_create:
+  stage: plan_create
+  script:
+    - echo "Exécution de terraform plan..."
+    - terraform plan -out=tfplan_create -lock=false -var="CONFIG_FILE=$CONFIG_FILE_NAME"
+    - terraform show -json tfplan_create > tfplan_create.json
+  dependencies:
+    - terraform_init_create 
+    - get_confluent_tags  
+  artifacts:
+    paths:
+      - tfplan_create
+      - .terraform
+      - .terraform.lock.hcl
+      - $CONFIG_FILE_NAME
+      - $SCHEMAS_DIRECTORY_NAME
+      - $CONNECTORS_DIRECTORY_NAME
+      - $FLINK_STATEMENTS_DIRECTORY_NAME
+
+    reports:
+      terraform: tfplan_create
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $SOURCE_JOB_NAME == "trigger_factory_pipeline"'
+      when: on_success
+  tags:
+    - docker9013
+
+terraform_apply_create:
+  stage: apply_create
+  script:
+    - terraform apply tfplan_create
+    - terraform output -json service_accounts_credentials > tf_output_credentials.json
+  dependencies:
+    - terraform_plan_create
+  artifacts:
+    paths:
+      - tfplan_create
+      - .terraform
+      - .terraform.lock.hcl
+      - $CONFIG_FILE_NAME
+      - $SCHEMAS_DIRECTORY_NAME
+      - $CONNECTORS_DIRECTORY_NAME
+      - $FLINK_STATEMENTS_DIRECTORY_NAME
+      
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $SOURCE_JOB_NAME == "trigger_factory_pipeline"'
+      when: manual
+  tags:
+    - docker9013

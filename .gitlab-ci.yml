@@ -1,0 +1,53 @@
+include:
+  - local: 'create-terraform-ci.yml'
+  - local: 'destroy-terraform-ci.yml'
+  - local: 'confluent-mfs/dev/create-env-terraform-ci_dev.yml'
+  - local: 'confluent-mfs/ope/create-env-terraform-ci_ope.yml'
+  - local: 'confluent-mfs/int/create-env-terraform-ci_int.yml'
+  - local: 'confluent-mfs/sta/create-env-terraform-ci_sta.yml'
+  - local: 'confluent-mfs/debug/create-env-terraform-ci_debug.yml'
+
+variables:
+
+  PROJECT_NAME: 
+    value: "" 
+    description: Please type your project name
+
+  ENVIRONMENT_NAME: 
+    value: "" 
+    description: Please type your environment name (dev, ope, int, sta or debug)
+    
+  ARTEFACT_FILE: "ARTEFACT_FILE"
+
+before_script:
+    - export http_proxy=http://${LOGIN}:${PASS}@138.21.89.192:3128
+    - export https_proxy=$http_proxy
+
+stages: 
+  - read_config
+  - lint
+  - init_create
+  - prepare_plan 
+  - plan_create
+  - apply_create
+  - init_dev
+  - plan_dev
+  - apply_dev
+  - init_ope
+  - plan_ope
+  - apply_ope
+  - init_sta
+  - plan_sta
+  - apply_sta
+  - init_int
+  - plan_int
+  - apply_int
+  - init_destroy
+  - plan_destroy
+  - apply_destroy
+  - init_debug
+  - plan_debug
+  - apply_debug
+  - export_vars
+  - tags
+

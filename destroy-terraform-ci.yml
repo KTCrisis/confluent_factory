@@ -1,0 +1,82 @@
+default:  
+  image: 
+    name : ${HARBOR_URL}/common/hashicorp/terraform:1.0.8
+    entrypoint: [""]
+
+stages:
+  - init_destroy
+  - plan_destroy
+  - apply_destroy
+
+
+terraform_init_destroy:
+  stage: init_destroy
+  variables:
+    TF_STATE_NAME : ${PROJECT_NAME}.tfstate
+    TF_HTTP_SSL_VERIFY: "false"
+    TF_HTTP_ADDRESS:  ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${TF_STATE_NAME}
+    TF_HTTP_LOCK_ADDRESS: ${TF_HTTP_ADDRESS}/lock
+    TF_HTTP_UNLOCK_ADDRESS: ${TF_HTTP_ADDRESS}/lock 
+    TF_HTTP_USERNAME: ${TF_HTTP_USERNAME}
+    TF_HTTP_PASSWORD: ${TF_HTTP_PASSWORD}
+    TF_HTTP_LOCK_METHOD: "POST"
+    TF_HTTP_UNLOCK_METHOD: "DELETE"
+    TF_HTTP_RETRY_WAIT_MIN: "5"
+  script:
+    - mkdir -p destroy
+    - cp provider.tf backend.tf variables.tf destroy/
+    - cd destroy/
+    - export file="variables.tf"
+    - sed '1,4d' "$file" > temp_file && mv temp_file "$file"
+    - echo "CI_API_V4_URL=${CI_API_V4_URL}, CI_PROJECT_ID=${CI_PROJECT_ID}, CI_PROJECT_NAME=${CI_PROJECT_NAME}, CI_COMMIT_REF_NAME=${CI_COMMIT_REF_NAME}, PROJECT_NAME=${PROJECT_NAME}"
+    - echo TF_state_name= $TF_HTTP_ADDRESS
+    - terraform init
+        -backend-config="address=${TF_HTTP_ADDRESS}"
+        -backend-config="lock_address=${TF_HTTP_LOCK_ADDRESS}"
+        -backend-config="unlock_address=${TF_HTTP_UNLOCK_ADDRESS}"
+        -backend-config="username=${TF_HTTP_USERNAME}"
+        -backend-config="password=${TF_HTTP_PASSWORD}"
+        -backend-config="lock_method=${TF_HTTP_LOCK_METHOD}"
+        -backend-config="unlock_method=${TF_HTTP_UNLOCK_METHOD}"
+        -backend-config="retry_wait_min=${TF_HTTP_RETRY_WAIT_MIN}"
+        -backend-config="skip_cert_verification=true"
+  artifacts:
+    paths:
+      - destroy/
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PROJECT_NAME != ""'
+      when: on_success
+  tags:
+    - docker9013
+
+terraform_plan_destroy:
+  stage: plan_destroy 
+  script:
+    - cd destroy/
+    - terraform plan -destroy -out=tfplan_destroy 
+  dependencies:
+    - terraform_init_destroy
+  artifacts:
+    paths:
+      - destroy/
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PROJECT_NAME != "" && $ENVIRONMENT_NAME == ""'
+      when: on_success
+  tags:
+    - docker9013
+
+terraform_apply_destroy:
+  stage: apply_destroy
+  script:
+    - cd destroy/
+    - terraform apply tfplan_destroy 
+  dependencies:
+    - terraform_plan_destroy
+  artifacts:
+    paths:
+      - destroy/
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PROJECT_NAME != ""'
+      when: manual
+  tags:
+    - docker9013
