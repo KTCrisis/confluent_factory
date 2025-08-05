@@ -1,18 +1,7 @@
 environment:
 
   - name : "MFS-sta"
-    stream_governance_package : "ESSENTIALS"
-    # network:
-    #   - name: "PSC-KFK-STAA"
-    #     connection_types: "PRIVATELINK"
-    #     cloud_provider: "GCP"
-    #     region: "europe-west1"       
-    #     zones: ["europe-west1-b", "europe-west1-c", "europe-west1-d"]
-        # network_config :  
-        #   - ingress_connection_name: "ingress_connnection"  
-        #     project_id: "irn-72775-kfk-sta-450"
-
-        
+    stream_governance_package : "ESSENTIALS"      
     cluster :
       name : "cluster-sta"
       type : "standard"
@@ -26,6 +15,7 @@ environment:
 
     flink:
       max_cfu: 5
+
 
 
 
