@@ -10,29 +10,8 @@ environment:
         zones: ["europe-west1-b", "europe-west1-c", "europe-west1-d"]
         network_config :  
         
-          - ingress_connection_name: "PSC-IRN-72775-KFK-DEV-CNX"  
-            project_id: "irn-72775-kfk-dev-39"
-
-          - ingress_connection_name: "CNX-host-project-euwest1-1"  
-            project_id: "host-project-euwest1-1"
-
-          - ingress_connection_name: "PSC-irn-73453-ope-b1"  
-            project_id: "irn-73453-ope-b1"
-
-          - ingress_connection_name: "PSC-irn-79267-kio-dev-b8"  
-            project_id: "irn-79267-kio-dev-b8"
-
-          - ingress_connection_name: "PSC-irn-73453-dev-0f"  
-            project_id: "irn-73453-dev-0f"
-
-          - ingress_connection_name: "PSC-irn-80416-xhb-dev-15"  
-            project_id: "irn-80416-xhb-dev-15"
-
-          - ingress_connection_name: "PSC-irn-80705-xdp-dev-8f"  
-            project_id: "irn-80705-xdp-dev-8f"       
-
-          - ingress_connection_name: "PSC-irn-80705-xhb-dev-a1"  
-            project_id: "irn-80705-xhb-dev-a1"
+          - ingress_connection_name: "PSC-1"  
+            project_id: "id1"
 
     cluster :
       name : "mfs-cluster-dev"
@@ -48,3 +27,4 @@ environment:
 
     flink:
       max_cfu: 5
+
